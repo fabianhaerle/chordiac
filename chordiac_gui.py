@@ -16,6 +16,7 @@ Features:
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 
@@ -171,6 +172,9 @@ class ChordiacApp(tk.Tk):
         )
         self.vergleich_btn.pack(side=tk.LEFT, padx=(6, 0))
 
+        # ── Keyboard ────────────────────────────────────────────────────
+        self._build_keyboard_section(main)
+
         # ── Separator ────────────────────────────────────────────────────
         ttk.Separator(main, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
 
@@ -247,6 +251,237 @@ class ChordiacApp(tk.Tk):
             self.after(0, lambda: self.status_var.set("✓ Vergleich fertig"))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ── Keyboard ───────────────────────────────────────────────────────
+
+    # Layout constants
+    _SW = 32          # semitone width (px)
+    _WHITE_H = 100    # white key height (px)
+    _BLACK_H = 62     # black key height (px)
+    _BLACK_W = 20     # black key width (px)
+    _OCTAVES = 2      # number of octaves to display
+
+    def _build_keyboard_section(self, parent: ttk.Frame) -> None:
+        """Add the ET-vs-just overlay keyboard to *parent*."""
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.X, pady=(4, 2))
+
+        # ── Tuning toggle + Clear button ────────────────────────────────
+        ctrl_row = ttk.Frame(frame)
+        ctrl_row.pack(fill=tk.X, pady=(0, 2))
+        ttk.Label(ctrl_row, text="Keyboard:", width=18, anchor="e").pack(side=tk.LEFT)
+
+        self._tuning = tk.StringVar(value="just")
+        et_rb = ttk.Radiobutton(ctrl_row, text="ET", variable=self._tuning,
+                                value="et", command=self._on_tuning_change)
+        et_rb.pack(side=tk.LEFT, padx=(6, 0))
+        just_rb = ttk.Radiobutton(ctrl_row, text="Just", variable=self._tuning,
+                                  value="just", command=self._on_tuning_change)
+        just_rb.pack(side=tk.LEFT, padx=2)
+        ttk.Label(ctrl_row, text="   click a key to add note",
+                  foreground="gray").pack(side=tk.LEFT, padx=(8, 0))
+        self._clear_kb_btn = ttk.Button(ctrl_row, text="Clear notes",
+                                        command=self._on_clear_keyboard)
+        self._clear_kb_btn.pack(side=tk.RIGHT, padx=(0, 4))
+
+        # ── Canvas ───────────────────────────────────────────────────────
+        total_w = self._OCTAVES * 12 * self._SW
+        canvas_h = self._WHITE_H + 20  # extra space for labels
+        self._kb_canvas = tk.Canvas(frame, width=total_w, height=canvas_h,
+                                    bg="#f8f8f8", highlightthickness=1,
+                                    highlightbackground="#ccc")
+        self._kb_canvas.pack(pady=(0, 0))
+        self._kb_canvas.bind("<Button-1>", self._on_keyboard_click)
+
+        # ── Offset scale note ────────────────────────────────────────────
+        note_frame = ttk.Frame(frame)
+        note_frame.pack(fill=tk.X)
+        ttk.Label(note_frame, text="",
+                  width=18, anchor="e").pack(side=tk.LEFT)
+        self._offset_label = tk.StringVar(value="")
+        ttk.Label(note_frame, textvariable=self._offset_label,
+                  foreground="gray", font=("", 9)).pack(side=tk.LEFT, padx=(6, 0))
+
+        # Draw the keyboard
+        self._draw_keyboard()
+
+    def _draw_keyboard(self) -> None:
+        """Draw (or redraw) the piano keys and just markers on the canvas."""
+        c = self._kb_canvas
+        c.delete("all")
+        SW = self._SW
+        OCT = self._OCTAVES
+
+        # Compute white-key boundaries per octave
+        # semitone positions of white keys in one octave
+        wk_semitones = [0, 2, 4, 5, 7, 9, 11]
+        # For each white key, its left edge and right edge (in semitone units)
+        wk_ranges: list[tuple[int, int, int]] = []  # (octave, start_semi, end_semi)
+        for octave in range(OCT):
+            for i, s in enumerate(wk_semitones):
+                start = s
+                end = wk_semitones[i + 1] if i + 1 < len(wk_semitones) else 12
+                wk_ranges.append((octave, start, end))
+
+        # Draw white keys
+        for octave, start_s, end_s in wk_ranges:
+            x1 = (octave * 12 + start_s) * SW
+            x2 = (octave * 12 + end_s) * SW
+            y1, y2 = 0, self._WHITE_H
+            c.create_rectangle(x1, y1, x2, y2, fill="white", outline="#999",
+                               tags="white_key")
+
+            # Label (note name)
+            semi_in_octave = start_s
+            note_label = core.INTERVAL_NAMES.get(semi_in_octave, "")
+            cx = (x1 + x2) / 2
+            c.create_text(cx, self._WHITE_H - 8, text=note_label,
+                          font=("", 8), fill="#666", tags="label")
+
+        # Draw black keys
+        bk_semitones = [1, 3, 6, 8, 10]
+        for octave in range(OCT):
+            for s in bk_semitones:
+                cx = (octave * 12 + s) * SW + SW / 2
+                x1 = cx - self._BLACK_W / 2
+                x2 = cx + self._BLACK_W / 2
+                y1, y2 = 0, self._BLACK_H
+                c.create_rectangle(x1, y1, x2, y2, fill="#333", outline="#222",
+                                   tags="black_key")
+
+                # Label
+                note_label = core.INTERVAL_NAMES.get(s, "")
+                c.create_text(cx, self._BLACK_H - 8, text=note_label,
+                              font=("", 7), fill="#ccc", tags="label")
+
+        # Draw just markers
+        for octave in range(OCT):
+            for s in range(12):
+                jr = core.JUST_RATIOS.get(s)
+                if jr is None:
+                    continue
+                # Just position in semitones from root
+                just_semi = 12.0 * math.log2(jr)
+                # Offset from ET center (in pixels)
+                et_center = (octave * 12 + s) * SW + SW / 2
+                just_x = (octave * 12 + just_semi) * SW + SW / 2
+                offset_px = just_x - et_center
+
+                # Draw a vertical line for the just position
+                y1, y2 = 2, self._WHITE_H - 4 if core.IS_WHITE_KEY[s] else self._BLACK_H - 4
+                line_color = "#e74c3c" if abs(offset_px) > 1.0 else "#27ae60"
+                c.create_line(just_x, y1, just_x, y2, fill=line_color,
+                              width=2, tags="just_marker")
+
+                # Draw a small circle at the just position
+                dot_color = "#c0392b" if abs(offset_px) > 1.0 else "#2ecc71"
+                dot_y = 6 if core.IS_WHITE_KEY[s] else 6
+                c.create_oval(just_x - 3, dot_y - 3, just_x + 3, dot_y + 3,
+                              fill=dot_color, outline="", tags="just_marker")
+
+        # Draw border line between white and black key area
+        c.create_line(0, self._BLACK_H, self._OCTAVES * 12 * SW, self._BLACK_H,
+                      fill="#999", width=1)
+
+    def _on_keyboard_click(self, event: tk.Event) -> None:
+        """Handle a click on the keyboard canvas."""
+        SW = self._SW
+        x, y = event.x, event.y
+
+        # Determine octave and semitone
+        semi_float = x / SW
+        octave = int(semi_float // 12)
+        semi = int(semi_float % 12)
+        if octave < 0 or octave >= self._OCTAVES:
+            return
+        if semi < 0 or semi > 11:
+            return
+
+        # Determine if black key was hit (within its narrow zone)
+        is_black = not core.IS_WHITE_KEY[semi]
+        if is_black and y < self._BLACK_H:
+            # Check if x is within the black key width
+            cx = int(semi_float) * SW + SW / 2
+            if abs(x - cx) > self._BLACK_W / 2 + 3:
+                # Missed the black key — check nearest white key instead
+                is_black = False
+                # Determine which white key this falls in
+                semi = self._nearest_white_key(int(semi_float) % 12)
+                if semi is None:
+                    return
+
+        self._add_note_from_keyboard(octave, semi)
+
+    def _nearest_white_key(self, semi: int) -> int | None:
+        """Return the nearest white-key semitone to *semi*."""
+        wk = [0, 2, 4, 5, 7, 9, 11]
+        if semi in wk:
+            return semi
+        # Find the containing white key range
+        for i, w in enumerate(wk):
+            if i + 1 < len(wk) and w <= semi < wk[i + 1]:
+                # Return the closer edge
+                if semi - w <= wk[i + 1] - semi:
+                    return w
+                else:
+                    return wk[i + 1]
+        if semi < wk[0]:
+            return wk[0]
+        return wk[-1]
+
+    def _add_note_from_keyboard(self, octave: int, semi: int) -> None:
+        """Add the note at *(octave, semi)* to the partials field and play."""
+        if self._tuning.get() == "just":
+            ratio = core.JUST_RATIOS.get(semi, 1.0)
+        else:
+            ratio = core.et_ratio(semi)
+        # Account for octave
+        multiplier = ratio * (2.0 ** octave)
+
+        # Read current partials, append new multiplier
+        raw = self.partials_text.get().strip()
+        try:
+            current = [float(x) for x in raw.split()] if raw else []
+        except ValueError:
+            current = []
+        current.append(multiplier)
+
+        # Format nicely — use integers where possible
+        formatted = []
+        for m in current:
+            if abs(m - round(m)) < 1e-9:
+                formatted.append(str(int(round(m))))
+            else:
+                formatted.append(f"{m:.4f}")
+        self.partials_text.set(" ".join(formatted))
+
+        # Show offset info
+        if self._tuning.get() == "just":
+            cents = core.cents_deviation(semi)
+            note_name = core.NOTE_NAMES.get(semi, f"{semi}")
+            self._offset_label.set(
+                f"{note_name}: just = {core.JUST_RATIOS[semi]:.4f}, "
+                f"ET = {core.et_ratio(semi):.4f}  "
+                f"({'−' if cents < 0 else '+'}{abs(cents):.0f} cents)"
+            )
+        else:
+            note_name = core.NOTE_NAMES.get(semi, f"{semi}")
+            self._offset_label.set(
+                f"{note_name}: ET = {core.et_ratio(semi):.4f}"
+            )
+
+        self._last_description = f"keyboard ({len(current)} notes)"
+        self._auto_play()
+
+    def _on_tuning_change(self) -> None:
+        """Handle ET/Just toggle — clear the offset label."""
+        self._offset_label.set("")
+
+    def _on_clear_keyboard(self) -> None:
+        """Clear the partials field and reset offset label."""
+        self.partials_text.set("")
+        self._offset_label.set("")
+        self._last_description = "keyboard (cleared)"
 
     # ── Playback ────────────────────────────────────────────────────────
 

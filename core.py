@@ -129,6 +129,65 @@ def harmonic_series_multipliers(n: int = 16) -> list[float]:
     return [float(i) for i in range(1, n + 1)]
 
 
+# ── Just intonation ratio table ───────────────────────────────────────────────
+
+# Standard 5-limit just intonation ratios for each semitone (0 = unison).
+# ET ratios are 2^(s/12); JUST_RATIOS are the pure-interval counterparts.
+# The difference (offset in cents) is 1200 * log2(just_ratio / et_ratio).
+JUST_RATIOS: dict[int, float] = {
+     0: 1/1,      # unison
+     1: 16/15,    # minor second   ≈ 1.0667
+     2: 9/8,      # major second   ≈ 1.1250
+     3: 6/5,      # minor third    ≈ 1.2000
+     4: 5/4,      # major third    ≈ 1.2500
+     5: 4/3,      # perfect fourth ≈ 1.3333
+     6: 45/32,    # tritone (aug. fourth) ≈ 1.40625
+     7: 3/2,      # perfect fifth  ≈ 1.5000
+     8: 8/5,      # minor sixth    ≈ 1.6000
+     9: 5/3,      # major sixth    ≈ 1.6667
+    10: 9/5,      # minor seventh  ≈ 1.8000
+    11: 15/8,     # major seventh  ≈ 1.8750
+}
+
+# Note names per semitone
+NOTE_NAMES: dict[int, str] = {
+     0: "C",   1: "C♯/D♭",  2: "D",   3: "D♯/E♭",
+     4: "E",   5: "F",      6: "F♯/G♭", 7: "G",
+     8: "G♯/A♭", 9: "A",  10: "A♯/B♭", 11: "B",
+}
+
+# Interval names per semitone
+INTERVAL_NAMES: dict[int, str] = {
+     0: "1",   1: "♭2",  2: "2",   3: "♭3",
+     4: "3",   5: "4",   6: "♭5",  7: "5",
+     8: "♭6",  9: "6",  10: "♭7", 11: "7",
+}
+
+# Whether a semitone is a "white key" on the piano
+IS_WHITE_KEY: dict[int, bool] = {
+     0: True,   1: False,  2: True,   3: False,
+     4: True,   5: True,   6: False,  7: True,
+     8: False,  9: True,  10: False, 11: True,
+}
+
+
+def et_ratio(semitone: int) -> float:
+    """Return the equal-temperament frequency ratio for *semitone* steps above root."""
+    return 2.0 ** (semitone / 12.0)
+
+
+def cents_deviation(semitone: int) -> float:
+    """Return the deviation of the just ratio from the ET ratio, in cents.
+
+    Positive = just ratio is higher (sharper) than ET.
+    """
+    jr = JUST_RATIOS.get(semitone)
+    if jr is None:
+        return 0.0
+    er = et_ratio(semitone)
+    return 1200.0 * math.log2(jr / er)
+
+
 # ── Dreiklang comparison ──────────────────────────────────────────────────────
 
 # The three chords for sequential comparison: major, minor, geometric-mean.
