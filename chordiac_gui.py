@@ -218,6 +218,7 @@ class ChordiacApp(tk.Tk):
 
     def _on_preset(self, preset_key: str | None, label: str) -> None:
         """Handle a preset button click."""
+        self._kb_notes.clear()
         if preset_key is None:
             # Geometric mean
             mults = core.geometric_mean_multipliers()
@@ -265,6 +266,9 @@ class ChordiacApp(tk.Tk):
         """Add the ET-vs-just overlay keyboard to *parent*."""
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.X, pady=(4, 2))
+
+        # Track notes entered via keyboard for recalc on tuning switch
+        self._kb_notes: list[tuple[int, int]] = []
 
         # ── Tuning toggle + Clear button ────────────────────────────────
         ctrl_row = ttk.Frame(frame)
@@ -429,31 +433,36 @@ class ChordiacApp(tk.Tk):
             return wk[0]
         return wk[-1]
 
-    def _add_note_from_keyboard(self, octave: int, semi: int) -> None:
-        """Add the note at *(octave, semi)* to the partials field and play."""
-        if self._tuning.get() == "just":
-            ratio = core.JUST_RATIOS.get(semi, 1.0)
-        else:
-            ratio = core.et_ratio(semi)
-        # Account for octave
-        multiplier = ratio * (2.0 ** octave)
+    def _rebuild_from_kb_notes(self) -> None:
+        """Recalculate the partials field from ``_kb_notes`` using current tuning."""
+        if not self._kb_notes:
+            self.partials_text.set("")
+            self._last_description = "keyboard (cleared)"
+            return
 
-        # Read current partials, append new multiplier
-        raw = self.partials_text.get().strip()
-        try:
-            current = [float(x) for x in raw.split()] if raw else []
-        except ValueError:
-            current = []
-        current.append(multiplier)
+        tuning = self._tuning.get()
+        multipliers: list[float] = []
+        for octave, semi in self._kb_notes:
+            if tuning == "just":
+                ratio = core.JUST_RATIOS.get(semi, 1.0)
+            else:
+                ratio = core.et_ratio(semi)
+            multipliers.append(ratio * (2.0 ** octave))
 
-        # Format nicely — use integers where possible
+        # Format nicely
         formatted = []
-        for m in current:
+        for m in multipliers:
             if abs(m - round(m)) < 1e-9:
                 formatted.append(str(int(round(m))))
             else:
                 formatted.append(f"{m:.4f}")
         self.partials_text.set(" ".join(formatted))
+        self._last_description = f"keyboard ({len(multipliers)} notes)"
+
+    def _add_note_from_keyboard(self, octave: int, semi: int) -> None:
+        """Add the note at *(octave, semi)* to the keyboard note list and play."""
+        self._kb_notes.append((octave, semi))
+        self._rebuild_from_kb_notes()
 
         # Show offset info
         if self._tuning.get() == "just":
@@ -470,15 +479,18 @@ class ChordiacApp(tk.Tk):
                 f"{note_name}: ET = {core.et_ratio(semi):.4f}"
             )
 
-        self._last_description = f"keyboard ({len(current)} notes)"
         self._auto_play()
 
     def _on_tuning_change(self) -> None:
-        """Handle ET/Just toggle — clear the offset label."""
+        """Handle ET/Just toggle — recalc all keyboard notes and re-play."""
         self._offset_label.set("")
+        if self._kb_notes:
+            self._rebuild_from_kb_notes()
+            self._auto_play()
 
     def _on_clear_keyboard(self) -> None:
-        """Clear the partials field and reset offset label."""
+        """Clear the keyboard notes, partials field, and offset label."""
+        self._kb_notes.clear()
         self.partials_text.set("")
         self._offset_label.set("")
         self._last_description = "keyboard (cleared)"
