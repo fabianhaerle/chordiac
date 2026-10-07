@@ -18,12 +18,14 @@ import core
 # ── CLI helpers ───────────────────────────────────────────────────────────────
 
 
-def _play_preset(name: str, partials: tuple[float, ...],
+def _play_preset(name: str, multipliers: tuple[float, ...],
                  root_freq: float, duration: float,
-                 waveform: str, fold_octaves: bool) -> None:
-    print(f"  ♪ {name}: partials {partials}")
+                 waveform: str) -> None:
+    """Play a preset chord. *multipliers* are exact ratios (no folding needed)."""
+    print(f"  ♪ {name}: {list(multipliers)}")
     samples = core.build_chord(
-        list(partials), root_freq, duration, waveform, core.SAMPLE_RATE, fold_octaves,
+        list(multipliers), root_freq, duration, waveform, core.SAMPLE_RATE,
+        fold_octaves=False,
     )
     core.play(samples, core.SAMPLE_RATE)
 
@@ -143,13 +145,13 @@ def main() -> None:
         # ── 7–9  Presets ─────────────────────────────────────────────────
         elif choice == "7":
             _play_preset("just major", core.PRESETS["just major"],
-                         root_freq, duration, waveform, fold_octaves)
+                         root_freq, duration, waveform)
         elif choice == "8":
             _play_preset("just minor", core.PRESETS["just minor"],
-                         root_freq, duration, waveform, fold_octaves)
+                         root_freq, duration, waveform)
         elif choice == "9":
             _play_preset("harmonic seventh", core.PRESETS["harmonic seventh"],
-                         root_freq, duration, waveform, fold_octaves)
+                         root_freq, duration, waveform)
 
         # ── v  Vergleich ─────────────────────────────────────────────────
         elif choice == "v":

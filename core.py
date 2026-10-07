@@ -21,12 +21,14 @@ FADE_MS = 10              # fade-in/out envelope (ms) to avoid clicks
 DEFAULT_ROOT = 220.0      # Hz  (A3)
 DEFAULT_DURATION = 2.0    # seconds
 
-# Just-intonation presets stored as raw harmonic-partial numbers.
-# Octave folding (menu toggle) will fold them into [1, 2) on playback.
+# Just-intonation presets stored as exact frequency multipliers (already in
+# the [1, 2) range — close position). These are NOT raw harmonic partials
+# because chords like the minor triad (10:12:15) cannot be expressed as
+# folded harmonic partials.
 PRESETS: dict[str, tuple[float, ...]] = {
-    "just major":       (1, 5, 3),     # folded → 1, 5/4, 3/2
-    "just minor":       (1, 6, 5),     # folded → 1, 6/5, 3/2
-    "harmonic seventh": (1, 5, 3, 7),  # folded → 1, 5/4, 3/2, 7/4
+    "just major":       (1.0, 1.25, 1.5),     # 1 : 5/4 : 3/2
+    "just minor":       (1.0, 1.2, 1.5),      # 1 : 6/5 : 3/2
+    "harmonic seventh": (1.0, 1.25, 1.5, 1.75),  # 1 : 5/4 : 3/2 : 7/4
 }
 
 # ── Audio helpers ─────────────────────────────────────────────────────────────
@@ -131,8 +133,8 @@ def harmonic_series_multipliers(n: int = 16) -> list[float]:
 
 # The three chords for sequential comparison: major, minor, geometric-mean.
 COMPARISON: list[tuple[str, list[float] | None]] = [
-    ("Dur  (just major)",       [1.0, 5.0, 3.0]),
-    ("Moll (just minor)",       [1.0, 6.0, 5.0]),
+    ("Dur  (just major)",       [1.0, 1.25, 1.5]),
+    ("Moll (just minor)",       [1.0, 1.2, 1.5]),
     ("Mittelterz (geo. mean)",  None),  # special: geometric_mean_multipliers()
 ]
 """Name and multipliers for each chord in the comparison sequence.
@@ -158,7 +160,7 @@ def build_comparison(root_freq: float, duration: float, waveform: str,
         if mults is None:
             mults = geometric_mean_multipliers()
         samples = build_chord(mults, root_freq, duration, waveform,
-                              sample_rate, fold_octaves=True)
+                              sample_rate, fold_octaves=False)
         parts.append(samples)
         parts.append(silence)
 

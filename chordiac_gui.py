@@ -224,9 +224,9 @@ class ChordiacApp(tk.Tk):
             self.partials_text.set(" ".join(str(m) for m in mults))
             self._last_description = "harmonic series 1–16"
         else:
-            partials = core.PRESETS[preset_key]
-            self.partials_text.set(" ".join(str(int(p)) for p in partials))
-            self._last_description = f"{preset_key} {partials}"
+            mults = core.PRESETS[preset_key]
+            self.partials_text.set(" ".join(f"{m:g}" for m in mults))
+            self._last_description = f"{preset_key} {list(mults)}"
 
         self._auto_play()
 
