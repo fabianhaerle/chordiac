@@ -127,6 +127,44 @@ def harmonic_series_multipliers(n: int = 16) -> list[float]:
     return [float(i) for i in range(1, n + 1)]
 
 
+# ── Dreiklang comparison ──────────────────────────────────────────────────────
+
+# The three chords for sequential comparison: major, minor, geometric-mean.
+COMPARISON: list[tuple[str, list[float] | None]] = [
+    ("Dur  (just major)",       [1.0, 5.0, 3.0]),
+    ("Moll (just minor)",       [1.0, 6.0, 5.0]),
+    ("Mittelterz (geo. mean)",  None),  # special: geometric_mean_multipliers()
+]
+"""Name and multipliers for each chord in the comparison sequence.
+
+``None`` means ``geometric_mean_multipliers()`` is used at call time.
+"""
+
+
+def build_comparison(root_freq: float, duration: float, waveform: str,
+                     sample_rate: int, gap: float = 0.6
+                     ) -> np.ndarray:
+    """Build one long waveform that plays all three comparison chords
+    (Dur → Moll → Mittelterz) separated by *gap* seconds of silence.
+
+    Each chord is built with ``fold_octaves=True`` so they are all in
+    close position (enge Lage).
+    """
+    parts: list[np.ndarray] = []
+    gap_samples = int(gap * sample_rate)
+    silence = np.zeros(gap_samples, dtype=np.float32)
+
+    for name, mults in COMPARISON:
+        if mults is None:
+            mults = geometric_mean_multipliers()
+        samples = build_chord(mults, root_freq, duration, waveform,
+                              sample_rate, fold_octaves=True)
+        parts.append(samples)
+        parts.append(silence)
+
+    return np.concatenate(parts).astype(np.float32)
+
+
 # ── Frequency parsing ─────────────────────────────────────────────────────────
 
 # Note → semitone offset (C=0, C#=1, … B=11)

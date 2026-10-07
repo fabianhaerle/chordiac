@@ -161,6 +161,16 @@ class ChordiacApp(tk.Tk):
                              command=lambda k=preset_key, lbl=label: self._on_preset(k, lbl))
             btn.pack(side=tk.LEFT, padx=2)
 
+        # ── Vergleich button ──────────────────────────────────────────────
+        row_comp = ttk.Frame(main)
+        row_comp.pack(fill=tk.X, pady=(2, 4))
+        ttk.Label(row_comp, text="", width=18, anchor="e").pack(side=tk.LEFT)
+        self.vergleich_btn = ttk.Button(
+            row_comp, text="Vergleich  (Dur → Moll → Mittelterz)",
+            command=self._on_comparison,
+        )
+        self.vergleich_btn.pack(side=tk.LEFT, padx=(6, 0))
+
         # ── Separator ────────────────────────────────────────────────────
         ttk.Separator(main, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
 
@@ -219,6 +229,24 @@ class ChordiacApp(tk.Tk):
             self._last_description = f"{preset_key} {partials}"
 
         self._auto_play()
+
+    def _on_comparison(self) -> None:
+        """Play the three-chord comparison (Dur → Moll → Mittelterz)."""
+        root_freq = self.root_freq.get()
+        waveform = self.waveform.get()
+        duration = self.duration.get()
+        self.status_var.set("♫  Vergleich: Dur → Moll → Mittelterz ...")
+        self.vergleich_btn.configure(state="disabled")
+
+        def worker() -> None:
+            samples = core.build_comparison(
+                root_freq, duration, waveform, core.SAMPLE_RATE, gap=0.6,
+            )
+            core.play(samples, core.SAMPLE_RATE)
+            self.after(0, lambda: self.vergleich_btn.configure(state="normal"))
+            self.after(0, lambda: self.status_var.set("✓ Vergleich fertig"))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ── Playback ────────────────────────────────────────────────────────
 

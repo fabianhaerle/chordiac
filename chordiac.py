@@ -80,6 +80,7 @@ def main() -> None:
         print("  7)  Preset:  just major")
         print("  8)  Preset:  just minor")
         print("  9)  Preset:  harmonic seventh")
+        print("  v)  Vergleich              (Dur → Moll → Mittelterz)")
         print("  h)  Harmonic series        (partials 1–16)")
         print("  q)  Quit")
         print()
@@ -149,6 +150,14 @@ def main() -> None:
         elif choice == "9":
             _play_preset("harmonic seventh", core.PRESETS["harmonic seventh"],
                          root_freq, duration, waveform, fold_octaves)
+
+        # ── v  Vergleich ─────────────────────────────────────────────────
+        elif choice == "v":
+            print("  ♪ Vergleich: Dur → Moll → Mittelterz")
+            samples = core.build_comparison(
+                root_freq, duration, waveform, core.SAMPLE_RATE, gap=0.6,
+            )
+            core.play(samples, core.SAMPLE_RATE)
 
         # ── h  Harmonic series ───────────────────────────────────────────
         elif choice == "h":
