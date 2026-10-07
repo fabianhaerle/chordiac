@@ -1,0 +1,3 @@
+# tkinter is part of Python's standard library — no pip install needed.
+numpy>=1.24
+sounddevice>=0.4

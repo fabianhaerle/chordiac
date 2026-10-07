@@ -1,0 +1,176 @@
+"""
+core — shared audio engine for chordiac.
+
+Provides tone generation, chord building, playback, frequency parsing,
+and preset definitions. Used by both the CLI (chordiac.py) and the GUI
+(chordiac_gui.py).
+"""
+
+from __future__ import annotations
+
+import math
+import re
+
+import numpy as np
+import sounddevice as sd
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+SAMPLE_RATE = 44100       # Hz
+FADE_MS = 10              # fade-in/out envelope (ms) to avoid clicks
+DEFAULT_ROOT = 220.0      # Hz  (A3)
+DEFAULT_DURATION = 2.0    # seconds
+
+# Just-intonation presets stored as raw harmonic-partial numbers.
+# Octave folding (menu toggle) will fold them into [1, 2) on playback.
+PRESETS: dict[str, tuple[float, ...]] = {
+    "just major":       (1, 5, 3),     # folded → 1, 5/4, 3/2
+    "just minor":       (1, 6, 5),     # folded → 1, 6/5, 3/2
+    "harmonic seventh": (1, 5, 3, 7),  # folded → 1, 5/4, 3/2, 7/4
+}
+
+# ── Audio helpers ─────────────────────────────────────────────────────────────
+
+
+def _sine_tone(freq: float, duration: float, waveform: str,
+               sample_rate: int) -> np.ndarray:
+    """Return a single tone at *freq*.
+
+    ``waveform`` is either ``"pure"`` (plain sine) or ``"rich"`` (sine + quiet
+    2nd and 3rd harmonics added for a warmer timbre).
+    """
+    n = int(duration * sample_rate)
+    t = np.arange(n, dtype=np.float64) / sample_rate
+    sig = np.sin(2.0 * np.pi * freq * t)
+
+    if waveform == "rich":
+        sig += 0.25 * np.sin(2.0 * np.pi * 2.0 * freq * t)   # 2nd harmonic
+        sig += 0.125 * np.sin(2.0 * np.pi * 3.0 * freq * t)  # 3rd harmonic
+        sig /= 1.375  # keep peak near 1.0
+
+    return sig
+
+
+def _apply_envelope(sig: np.ndarray, sample_rate: int,
+                    fade_ms: int) -> np.ndarray:
+    """Apply a short fade-in and fade-out to prevent audible clicks."""
+    fade_len = min(int(fade_ms * sample_rate / 1000), len(sig) // 2)
+    if fade_len > 0:
+        sig[:fade_len] *= np.linspace(0.0, 1.0, fade_len)
+        sig[-fade_len:] *= np.linspace(1.0, 0.0, fade_len)
+    return sig
+
+
+def build_chord(multipliers: list[float],
+                root_freq: float,
+                duration: float,
+                waveform: str,
+                sample_rate: int,
+                fold_octaves: bool) -> np.ndarray:
+    """Sum tones at ``root_freq × multiplier`` for each entry.
+
+    When *fold_octaves* is ``True`` each multiplier is shifted by powers of two
+    into the range ``[1, 2)``, so all voices sit in a single octave.
+    """
+    if not multipliers:
+        return np.zeros(int(duration * sample_rate), dtype=np.float32)
+
+    # Prepare (optionally folded) frequencies
+    freqs: list[float] = []
+    for m in multipliers:
+        if fold_octaves:
+            while m >= 2.0:
+                m /= 2.0
+            while m < 1.0:
+                m *= 2.0
+        freqs.append(root_freq * m)
+
+    # Sum all voices
+    total: np.ndarray | None = None
+    for f in freqs:
+        tone = _sine_tone(f, duration, waveform, sample_rate)
+        total = tone if total is None else total + tone
+
+    # Normalise and envelope
+    if total is not None:
+        peak = float(np.max(np.abs(total)))
+        if peak > 0.0:
+            total /= peak
+        total = _apply_envelope(total, sample_rate, FADE_MS)
+
+    return total.astype(np.float32)
+
+
+def play(samples: np.ndarray, sample_rate: int) -> None:
+    """Play a waveform through the default audio output."""
+    if len(samples) == 0:
+        return
+    sd.play(samples, samplerate=sample_rate)
+    sd.wait()
+
+
+# ── Preset multipliers ────────────────────────────────────────────────────────
+
+
+def geometric_mean_multipliers() -> list[float]:
+    """Return multipliers for the geometric-mean "middle third" chord.
+
+    ``[1, √(3/2), 3/2]`` — the third sits at the exact geometric mean between
+    root and fifth.
+    """
+    sq = math.sqrt(1.5)  # √(3/2) ≈ 1.2247
+    return [1.0, sq, 1.5]
+
+
+def harmonic_series_multipliers(n: int = 16) -> list[float]:
+    """Return multipliers ``[1, 2, 3, …, n]``."""
+    return [float(i) for i in range(1, n + 1)]
+
+
+# ── Frequency parsing ─────────────────────────────────────────────────────────
+
+# Note → semitone offset (C=0, C#=1, … B=11)
+_NOTE_TO_SEMITONE: dict[str, int] = {
+    "c": 0, "c#": 1, "db": 1,
+    "d": 2, "d#": 3, "eb": 3,
+    "e": 4,
+    "f": 5, "f#": 6, "gb": 6,
+    "g": 7, "g#": 8, "ab": 8,
+    "a": 9, "a#": 10, "bb": 10,
+    "b": 11,
+}
+# Pattern: note name (optional accidental) + octave number, e.g. A4, C#3, Bb2
+_NOTE_RE = re.compile(r"([a-g]#?b?)(-?\d+)$", re.IGNORECASE)
+
+
+def parse_frequency(s: str) -> float | None:
+    """Parse a frequency string.
+
+    Acceptable forms:
+
+    * A plain number — interpreted as Hz (``"220"``, ``"440.0"``).
+    * A note name + octave — uses A4 = 440 Hz equal temperament
+      (``"A3"``, ``"C#4"``, ``"Bb2"``).
+    """
+    s = s.strip()
+    if not s:
+        return None
+
+    # Try plain float first
+    try:
+        return float(s)
+    except ValueError:
+        pass
+
+    # Try note-name
+    m = _NOTE_RE.match(s)
+    if m:
+        key = m.group(1).lower()
+        semitone = _NOTE_TO_SEMITONE.get(key)
+        if semitone is not None:
+            octave = int(m.group(2))
+            index = semitone + 12 * octave           # C0 = 0
+            a4_index = 9 + 12 * 4                     # A4 = 57
+            return 440.0 * (2.0 ** ((index - a4_index) / 12.0))
+
+    return None
